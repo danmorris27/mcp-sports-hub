@@ -30,6 +30,7 @@ interface CacheEntry {
 }
 
 interface NegativeEntry {
+  status: 404 | 410;
   message: string;
   expiresAt: number;
 }
@@ -89,19 +90,19 @@ function setCache(key: string, data: unknown, ttl: number): void {
   }
 }
 
-function getNegative(key: string): string | undefined {
+function getNegative(key: string): NegativeEntry | undefined {
   const entry = negativeCache.get(key);
   if (!entry) return undefined;
   if (Date.now() > entry.expiresAt) {
     negativeCache.delete(key);
     return undefined;
   }
-  return entry.message;
+  return entry;
 }
 
-function setNegative(key: string, message: string): void {
+function setNegative(key: string, status: 404 | 410, message: string): void {
   if (NEGATIVE_CACHE_TTL <= 0) return;
-  negativeCache.set(key, { message, expiresAt: Date.now() + NEGATIVE_CACHE_TTL * 1000 });
+  negativeCache.set(key, { status, message, expiresAt: Date.now() + NEGATIVE_CACHE_TTL * 1000 });
   while (negativeCache.size > MAX_CACHE_ENTRIES) {
     const oldest = negativeCache.keys().next().value;
     if (oldest === undefined) break;
@@ -207,7 +208,7 @@ async function rawFetch(url: string, options: HttpOptions): Promise<Response> {
  */
 async function withCoalescing<T>(key: string, work: () => Promise<T>): Promise<T> {
   const negative = getNegative(key);
-  if (negative !== undefined) throw new HttpError(404, negative);
+  if (negative !== undefined) throw new HttpError(negative.status, negative.message);
 
   const existing = inFlight.get(key);
   if (existing) return existing as Promise<T>;
@@ -215,7 +216,7 @@ async function withCoalescing<T>(key: string, work: () => Promise<T>): Promise<T
   const promise = work()
     .catch((err: unknown) => {
       if (err instanceof HttpError && (err.status === 404 || err.status === 410)) {
-        setNegative(key, err.message);
+        setNegative(key, err.status, err.message);
       }
       throw err;
     })

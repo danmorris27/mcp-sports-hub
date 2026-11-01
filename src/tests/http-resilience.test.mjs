@@ -117,6 +117,20 @@ describe("negative caching", () => {
     }
     assert.equal(count("/missing"), 1, "a known-missing id must not be re-fetched");
   });
+
+  it("preserves a 410 status when served from the negative cache", async () => {
+    routes.set("/gone", (req, res) => {
+      res.writeHead(410);
+      res.end("gone");
+    });
+    for (let i = 0; i < 4; i++) {
+      await assert.rejects(
+        () => fetchJson(`${base}/gone`, { cacheTtl: 0 }),
+        (err) => err instanceof HttpError && err.status === 410,
+      );
+    }
+    assert.equal(count("/gone"), 1, "a known-gone id must not be re-fetched");
+  });
 });
 
 describe("cache isolation", () => {
